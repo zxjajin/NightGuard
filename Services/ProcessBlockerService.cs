@@ -45,7 +45,64 @@ public sealed class ProcessBlockerService : IDisposable
         "TextInputHost",
         "SecurityHealthSystray",
         "SystemSettings",
-        "Taskmgr"
+        "Taskmgr",
+        "ChsIME",
+        "SearchApp",
+        "SearchProtocolHost",
+        "SearchFilterHost",
+        "smartscreen",
+        "rundll32",
+        "backgroundTaskHost",
+        "CompPkgSrv",
+        "unsecapp",
+        "AggregatorHost",
+        "dasHost",
+        "WmiApSrv",
+        "wlanext",
+        "RtkAudUService64",
+        "NVDisplay.Container",
+        "nvcontainer",
+        "nvsphelper64",
+        "NVIDIA Overlay",
+        "NVIDIA Share",
+        "NVIDIA Web Helper",
+        "NVIDIA App",
+        "Clash Verge",
+        "clash",
+        "clash-meta",
+        "clash-verge-service",
+        "FlClash",
+        "FlClashHelperService",
+        "Clash for Windows",
+        "Clash Core Service",
+        "Codex",
+        "node_repl",
+        "extension-host",
+        "crashpad_handler",
+        "node",
+        "git",
+        "git-remote-https",
+        "rg",
+        "fd",
+        "PixPin",
+        "PixPinCapture",
+        "PixPinService",
+        "aw-qt",
+        "aw-server",
+        "aw-watcher-afk",
+        "aw-watcher-window",
+        "Weixin",
+        "WeChat",
+        "WeChatAppEx",
+        "WeChatBrowser",
+        "WeChatUtility",
+        "WeChatPlayer",
+        "YoudaoDict",
+        "YoudaoDictHelper",
+        "YoudaoEDIT",
+        "YoudaoWSH",
+        "YoudaoOcr",
+        "YoudaoDesktopDict"
     ];
 
     private readonly JsonLogService _logService;
@@ -107,7 +164,8 @@ public sealed class ProcessBlockerService : IDisposable
                 try
                 {
                     var processName = NormalizeProcessName(process.ProcessName);
-                    if (!ShouldBlock(process, processName, now))
+                    var hasWindow = process.MainWindowHandle != IntPtr.Zero;
+                    if (!ShouldBlock(process, processName, now, hasWindow))
                     {
                         continue;
                     }
@@ -115,7 +173,10 @@ public sealed class ProcessBlockerService : IDisposable
                     var id = process.Id;
                     process.Kill(entireProcessTree: true);
                     _logService.RecordBlockedProcess(_nightKey, processName, id);
-                    AskForTemporaryAccess(processName, now);
+                    if (hasWindow)
+                    {
+                        AskForTemporaryAccess(processName, now);
+                    }
                 }
                 catch
                 {
@@ -133,7 +194,7 @@ public sealed class ProcessBlockerService : IDisposable
         }
     }
 
-    private bool ShouldBlock(Process process, string processName, DateTimeOffset now)
+    private bool ShouldBlock(Process process, string processName, DateTimeOffset now, bool hasWindow)
     {
         if (string.IsNullOrWhiteSpace(processName))
         {
@@ -160,6 +221,11 @@ public sealed class ProcessBlockerService : IDisposable
             return false;
         }
 
+        if (process.SessionId == 0)
+        {
+            return false;
+        }
+
         if (BuiltInAllowedProcesses.Contains(processName, StringComparer.OrdinalIgnoreCase))
         {
             return false;
@@ -178,7 +244,15 @@ public sealed class ProcessBlockerService : IDisposable
             .Select(NormalizeProcessName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return _config.BlockAllAppsDuringRestriction || blocked.Contains(processName);
+        if (blocked.Contains(processName))
+        {
+            return true;
+        }
+
+        // Block-all mode is intended for foreground user apps. Background services,
+        // proxy cores, tray helpers, drivers, and watchdog processes usually have no
+        // main window; killing them caused proxy/screenshot/driver breakage.
+        return _config.BlockAllAppsDuringRestriction && hasWindow;
     }
 
     private void AskForTemporaryAccess(string processName, DateTimeOffset now)
