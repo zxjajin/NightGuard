@@ -1,33 +1,88 @@
-using Microsoft.Win32;
+using System.Diagnostics;
+using System.IO;
+using System.Reflection;
 
 namespace NightGuard.Services;
 
 public sealed class StartupService
 {
-    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string AppName = "NightGuard";
+    private const string TaskName = "NightGuard";
 
     public void SetEnabled(bool enabled)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-        if (key is null)
-        {
-            return;
-        }
-
         if (enabled)
         {
-            key.SetValue(AppName, $"\"{Environment.ProcessPath}\"");
+            CreateScheduledTask();
         }
         else
         {
-            key.DeleteValue(AppName, throwOnMissingValue: false);
+            DeleteScheduledTask();
         }
     }
 
     public bool IsEnabled()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: false);
-        return key?.GetValue(AppName) is string value && value.Contains(Environment.ProcessPath ?? "", StringComparison.OrdinalIgnoreCase);
+        return RunSchtasks(["/Query", "/TN", TaskName]).ExitCode == 0;
+    }
+
+    private static void CreateScheduledTask()
+    {
+        var launchCommand = BuildLaunchCommand();
+        var result = RunSchtasks([
+            "/Create",
+            "/TN", TaskName,
+            "/SC", "ONLOGON",
+            "/RL", "HIGHEST",
+            "/F",
+            "/TR", launchCommand
+        ]);
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Failed to create startup task: {result.Error}{result.Output}");
+        }
+    }
+
+    private static void DeleteScheduledTask()
+    {
+        RunSchtasks(["/Delete", "/TN", TaskName, "/F"]);
+    }
+
+    private static string BuildLaunchCommand()
+    {
+        var processPath = Environment.ProcessPath ?? "";
+        var assemblyPath = Assembly.GetEntryAssembly()?.Location ?? "";
+
+        if (Path.GetFileName(processPath).Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase)
+            && assemblyPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"\"{processPath}\" \"{assemblyPath}\"";
+        }
+
+        return $"\"{processPath}\"";
+    }
+
+    private static (int ExitCode, string Output, string Error) RunSchtasks(IReadOnlyList<string> arguments)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo
+        {
+            FileName = "schtasks.exe",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in arguments)
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+
+        process.Start();
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode, output, error);
     }
 }
