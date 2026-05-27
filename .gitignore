@@ -1,0 +1,10 @@
+bin/
+obj/
+Data/
+*.user
+*.suo
+*.tmp
+*.log
+.vs/
+.idea/
+*.bak
