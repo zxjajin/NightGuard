@@ -4,7 +4,8 @@ public sealed class AppConfig
 {
     public string RestrictionStart { get; set; } = "23:00";
     public string RestrictionEnd { get; set; } = "08:00";
-    public bool BlockAllAppsDuringRestriction { get; set; } = true;
+    public bool BlockAllAppsDuringRestriction { get; set; }
+    public bool EnableHostsBlocking { get; set; }
     public List<string> AlwaysAllowedProcesses { get; set; } =
     [
         "explorer.exe",

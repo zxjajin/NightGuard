@@ -35,7 +35,7 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
     public string RemainingRestrictionDisplay => $"今天剩余限制时间：{FormatTimeSpan(RemainingRestrictionTime)}";
     public string UnlockCountdownDisplay => $"倒计时：{FormatTimeSpan(UnlockCountdown)}";
     public string TonightUnlockCountDisplay => $"今晚已临时解锁次数：{TonightUnlockCount}";
-    public string RuleSummaryDisplay => $"应用白名单：{Config.AlwaysAllowedProcesses.Count} 个；网站黑名单：{Config.BlockedDomains.Count} 个";
+    public string RuleSummaryDisplay => $"应用白名单：{Config.AlwaysAllowedProcesses.Count} 个；网站黑名单：{Config.BlockedDomains.Count} 个；hosts 限制：{(Config.EnableHostsBlocking ? "开启" : "关闭")}";
     public int TonightUnlockCount { get; private set; }
     public bool CanEditRules => State is GuardState.NotRestricted;
     public bool CanRequestTemporaryUnlock => State is GuardState.Restricted && TonightUnlockCount < Config.MaxUnlocksPerNight;
@@ -57,14 +57,7 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
         if (_restrictionApplied && window is not null)
         {
             _processBlocker.UpdateConfig(Config, _nightKey, window.Value.End);
-            try
-            {
-                _hostsService.Apply(Config, _nightKey);
-            }
-            catch (Exception ex)
-            {
-                _logService.RecordSystemMessage(_nightKey, $"failed to re-apply hosts block after config reload: {ex.Message}");
-            }
+            ApplyOrRestoreHosts();
         }
 
         OnPropertyChanged(nameof(Config));
@@ -186,17 +179,28 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        ApplyOrRestoreHosts();
+        _processBlocker.Start(Config, _nightKey, restrictionEndsAt);
+        _restrictionApplied = true;
+    }
+
+    private void ApplyOrRestoreHosts()
+    {
         try
         {
-            _hostsService.Apply(Config, _nightKey);
+            if (Config.EnableHostsBlocking)
+            {
+                _hostsService.Apply(Config, _nightKey);
+            }
+            else
+            {
+                _hostsService.Restore(_nightKey);
+            }
         }
         catch (Exception ex)
         {
-            _logService.RecordSystemMessage(_nightKey, $"failed to apply hosts block: {ex.Message}");
+            _logService.RecordSystemMessage(_nightKey, $"failed to update hosts: {ex.Message}");
         }
-
-        _processBlocker.Start(Config, _nightKey, restrictionEndsAt);
-        _restrictionApplied = true;
     }
 
     private void ExitRestrictionMode()
@@ -207,15 +211,7 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
         }
 
         _processBlocker.Stop();
-        try
-        {
-            _hostsService.Restore(_nightKey);
-        }
-        catch (Exception ex)
-        {
-            _logService.RecordSystemMessage(_nightKey, $"failed to restore hosts: {ex.Message}");
-        }
-
+        RestoreHostsOnExit();
         _restrictionApplied = false;
     }
 

@@ -161,6 +161,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             RestrictionStart = config.RestrictionStart,
             RestrictionEnd = config.RestrictionEnd,
             BlockAllAppsDuringRestriction = config.BlockAllAppsDuringRestriction,
+            EnableHostsBlocking = config.EnableHostsBlocking,
             AlwaysAllowedProcesses = [.. config.AlwaysAllowedProcesses],
             BlockedProcesses = [.. config.BlockedProcesses],
             BlockedDomains = [.. config.BlockedDomains],

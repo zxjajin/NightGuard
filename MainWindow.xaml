@@ -55,6 +55,11 @@
                       IsEnabled="{Binding SettingsEditingEnabled}"
                       Margin="0,4,0,10"/>
 
+            <CheckBox Content="启用网站 hosts 限制（可能影响 Clash/TUN，默认关闭）"
+                      IsChecked="{Binding EditableConfig.EnableHostsBlocking}"
+                      IsEnabled="{Binding SettingsEditingEnabled}"
+                      Margin="0,4,0,10"/>
+
             <TextBlock Text="始终允许应用（每行一个 exe，例如 explorer.exe）"/>
             <TextBox Text="{Binding AllowedProcessText, UpdateSourceTrigger=PropertyChanged}"
                      AcceptsReturn="True"
