@@ -5,35 +5,55 @@ namespace NightGuard;
 
 public partial class AppAccessWindow : Window
 {
+    private readonly ExplorerAccessMode _mode;
+
     public AppAccessChoice Choice { get; private set; } = AppAccessChoice.Deny;
 
-    public AppAccessWindow(string processName)
+    public AppAccessWindow(ExplorerAccessRequest request)
     {
         InitializeComponent();
-        MessageText.Text = $"{processName}.exe 已被 NightGuard 拦截。选择一个临时放行选项后，请重新打开这个应用。";
+        _mode = request.Mode;
+
+        if (request.Mode == ExplorerAccessMode.ReminderOnly)
+        {
+            TitleText.Text = "夜间收尾提醒";
+            MessageText.Text = $"{request.TargetName} 已进入夜间收尾提醒时段。建议不要开启新问题，只做保存、整理、记录明天任务。";
+            PrimaryButton.Visibility = Visibility.Collapsed;
+            SecondaryButton.Visibility = Visibility.Collapsed;
+            TertiaryButton.Visibility = Visibility.Collapsed;
+            CloseButtonAction.Content = "知道了";
+            return;
+        }
+
+        TitleText.Text = "夜间收尾提醒";
+        MessageText.Text = $"{request.TargetName} 已进入夜间收尾时段。建议只做必要收尾，或把想继续探索的内容记录到明天。";
+        PrimaryButton.Content = "本晚不再限制";
+        SecondaryButton.Content = "记录到明天并最小化";
+        TertiaryButton.Content = "稍后再提醒我";
+        CloseButtonAction.Visibility = Visibility.Collapsed;
     }
 
-    private void AllowOneMinute_Click(object sender, RoutedEventArgs e)
+    private void Primary_Click(object sender, RoutedEventArgs e)
     {
-        Choice = AppAccessChoice.AllowOneMinute;
+        Choice = _mode == ExplorerAccessMode.LimitedWrapUp ? AppAccessChoice.AllowTonight : AppAccessChoice.Deny;
         DialogResult = true;
     }
 
-    private void AllowFifteenMinutes_Click(object sender, RoutedEventArgs e)
+    private void Secondary_Click(object sender, RoutedEventArgs e)
     {
-        Choice = AppAccessChoice.AllowFifteenMinutes;
+        Choice = _mode == ExplorerAccessMode.LimitedWrapUp ? AppAccessChoice.RecordForTomorrow : AppAccessChoice.Deny;
         DialogResult = true;
     }
 
-    private void AllowTonight_Click(object sender, RoutedEventArgs e)
+    private void Tertiary_Click(object sender, RoutedEventArgs e)
     {
-        Choice = AppAccessChoice.AllowTonight;
+        Choice = _mode == ExplorerAccessMode.LimitedWrapUp ? AppAccessChoice.RemindLater : AppAccessChoice.Deny;
         DialogResult = true;
     }
 
-    private void Deny_Click(object sender, RoutedEventArgs e)
+    private void CloseButtonAction_Click(object sender, RoutedEventArgs e)
     {
         Choice = AppAccessChoice.Deny;
-        DialogResult = false;
+        DialogResult = true;
     }
 }

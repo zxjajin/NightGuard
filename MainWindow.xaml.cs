@@ -20,13 +20,14 @@ public partial class MainWindow : Window
 
         var configService = new ConfigService();
         var logService = new JsonLogService(configService.DataDirectory);
-        var hostsService = new HostsService(configService.DataDirectory, logService);
-        var processBlocker = new ProcessBlockerService(logService);
+        var recordService = new GuardActionRecordService();
+        var hostsService = new HostsService(configService.DataDirectory, logService, recordService);
+        var processBlocker = new ProcessBlockerService(logService, recordService);
         processBlocker.AccessRequested = RequestAppAccess;
-        var engine = new RestrictionEngine(configService, logService, hostsService, processBlocker);
+        var engine = new RestrictionEngine(configService, logService, hostsService, processBlocker, recordService);
         engine.RestrictionStarted += (_, _) => ShowRestrictionStartedReminder();
 
-        _viewModel = new MainViewModel(configService, engine);
+        _viewModel = new MainViewModel(configService, engine, recordService);
         DataContext = _viewModel;
 
         _notifyIcon = new Forms.NotifyIcon
@@ -101,6 +102,11 @@ public partial class MainWindow : Window
         _viewModel.StartTestMode();
     }
 
+    private void RunStartupCheck_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.RunStartupCheck();
+    }
+
     private void UnlockSettings_Click(object sender, RoutedEventArgs e)
     {
         _viewModel.PasswordInput = SettingsPasswordBox.Password;
@@ -119,12 +125,70 @@ public partial class MainWindow : Window
         _viewModel.RestoreHostsNow();
     }
 
-    private AppAccessChoice RequestAppAccess(string processName)
+    private void ApplyTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: RuleTemplate template })
+        {
+            _viewModel.ApplyRuleTemplate(template);
+        }
+    }
+
+    private void ExportConfig_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "导出 NightGuard 配置",
+            Filter = "JSON 配置文件 (*.json)|*.json",
+            FileName = $"NightGuard_Config_{DateTime.Now:yyyyMMdd_HHmmss}.json"
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            _viewModel.ExportConfig(dialog.FileName);
+        }
+    }
+
+    private void ImportConfig_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "导入 NightGuard 配置",
+            Filter = "JSON 配置文件 (*.json)|*.json"
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var result = System.Windows.MessageBox.Show(
+            this,
+            "导入配置会覆盖当前设置，确定继续吗？",
+            "确认导入配置",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            _viewModel.ImportConfig(dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(this, $"导入失败：{ex.Message}", "导入配置", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private AppAccessChoice RequestAppAccess(ExplorerAccessRequest request)
     {
         return Dispatcher.Invoke(() =>
         {
             ShowFromTray();
-            var dialog = new AppAccessWindow(processName)
+            var dialog = new AppAccessWindow(request)
             {
                 Owner = this
             };
@@ -141,8 +205,8 @@ public partial class MainWindow : Window
             ShowFromTray();
             System.Windows.MessageBox.Show(
                 this,
-                "已到达限制时间，NightGuard 已进入限制模式。\n\n非白名单应用将被禁用；打开被限制应用时可以选择允许 1 分钟、15 分钟或今晚不限。",
-                "NightGuard 限制已开始",
+                "NightGuard 已进入限制模式。\n\n夜间探索型工具会在 23:30 - 07:00 进入收束提醒，可选择本晚不再限制、记录到明天并最小化，或 15 分钟后再提醒。",
+                "NightGuard 限制开始",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         });

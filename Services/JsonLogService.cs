@@ -24,6 +24,23 @@ public sealed class JsonLogService
         }
     }
 
+    public int GetNightFocusWrapUpCount(string nightKey)
+    {
+        lock (_sync)
+        {
+            return ReadStore().Days.FirstOrDefault(day => day.Date == nightKey)?.NightFocusWrapUpCount ?? 0;
+        }
+    }
+
+    public bool HasNightFocusReminder(string nightKey, string targetName)
+    {
+        lock (_sync)
+        {
+            return ReadStore().Days.FirstOrDefault(day => day.Date == nightKey)?
+                .NightFocusReminderTargets.Contains(targetName, StringComparer.OrdinalIgnoreCase) == true;
+        }
+    }
+
     public void RecordRestrictionStarted(string nightKey, DateTimeOffset time)
     {
         Mutate(nightKey, day =>
@@ -63,6 +80,22 @@ public sealed class JsonLogService
     public void RecordSystemMessage(string nightKey, string message)
     {
         Mutate(nightKey, day => day.SystemMessages.Add($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} {message}"));
+    }
+
+    public void RecordNightFocusReminder(string nightKey, string targetName)
+    {
+        Mutate(nightKey, day =>
+        {
+            if (!day.NightFocusReminderTargets.Contains(targetName, StringComparer.OrdinalIgnoreCase))
+            {
+                day.NightFocusReminderTargets.Add(targetName);
+            }
+        });
+    }
+
+    public void RecordNightFocusWrapUp(string nightKey)
+    {
+        Mutate(nightKey, day => day.NightFocusWrapUpCount++);
     }
 
     private void Mutate(string nightKey, Action<DailyLog> update)

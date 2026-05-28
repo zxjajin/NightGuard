@@ -144,9 +144,23 @@ public sealed class AppConfig
         "hdslb.com",
         "upos-hz-mirrorakam.akamaized.net"
     ];
+    public List<string> AlwaysAllowedDomains { get; set; } =
+    [
+        "chatgpt.com",
+        "chat.openai.com",
+        "claude.ai",
+        "gemini.google.com",
+        "perplexity.ai"
+    ];
     public int UnlockDelayMinutes { get; set; } = 5;
     public int TemporaryAllowanceMinutes { get; set; } = 10;
     public int MaxUnlocksPerNight { get; set; } = 2;
     public string SettingsPasswordHash { get; set; } = "";
     public bool StartWithWindows { get; set; }
+    public List<string> NightFocusProcesses { get; set; } =
+    [
+        "Codex.exe",
+        "Cursor.exe"
+    ];
+    public List<string> NightFocusDomains { get; set; } = [];
 }

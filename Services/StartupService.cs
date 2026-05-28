@@ -51,7 +51,8 @@ public sealed class StartupService
     private static string BuildLaunchCommand()
     {
         var processPath = Environment.ProcessPath ?? "";
-        var assemblyPath = Assembly.GetEntryAssembly()?.Location ?? "";
+        var assemblyName = Assembly.GetEntryAssembly()?.GetName().Name ?? "NightGuard";
+        var assemblyPath = Path.Combine(AppContext.BaseDirectory, $"{assemblyName}.dll");
 
         if (Path.GetFileName(processPath).Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase)
             && assemblyPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))

@@ -13,6 +13,8 @@ public sealed class DailyLog
     public int TemporaryUnlockCount { get; set; }
     public List<TemporaryUnlockLog> TemporaryUnlocks { get; set; } = [];
     public List<string> SystemMessages { get; set; } = [];
+    public int NightFocusWrapUpCount { get; set; }
+    public List<string> NightFocusReminderTargets { get; set; } = [];
 }
 
 public sealed class BlockedProcessLog

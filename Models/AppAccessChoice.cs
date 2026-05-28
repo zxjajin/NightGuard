@@ -4,6 +4,9 @@ public enum AppAccessChoice
 {
     Deny,
     AllowOneMinute,
+    AllowTenMinutes,
     AllowFifteenMinutes,
-    AllowTonight
+    AllowTonight,
+    RecordForTomorrow,
+    RemindLater
 }

@@ -1,11 +1,14 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using NightGuard.Models;
 
 namespace NightGuard.Services;
 
 public sealed class ProcessBlockerService : IDisposable
 {
+    private const int ShowWindowMinimize = 6;
+
     private static readonly string[] BuiltInAllowedProcesses =
     [
         "Idle",
@@ -42,12 +45,6 @@ public sealed class ProcessBlockerService : IDisposable
         "ShellExperienceHost",
         "StartMenuExperienceHost",
         "SearchHost",
-        "TextInputHost",
-        "SecurityHealthSystray",
-        "SystemSettings",
-        "Taskmgr",
-        "ChsIME",
-        "SearchApp",
         "SearchProtocolHost",
         "SearchFilterHost",
         "smartscreen",
@@ -75,7 +72,6 @@ public sealed class ProcessBlockerService : IDisposable
         "FlClashHelperService",
         "Clash for Windows",
         "Clash Core Service",
-        "Codex",
         "node_repl",
         "extension-host",
         "crashpad_handler",
@@ -106,6 +102,7 @@ public sealed class ProcessBlockerService : IDisposable
     ];
 
     private readonly JsonLogService _logService;
+    private readonly GuardActionRecordService _recordService;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _temporaryAllowedUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _promptCooldownUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _promptInProgress = new(StringComparer.OrdinalIgnoreCase);
@@ -118,11 +115,12 @@ public sealed class ProcessBlockerService : IDisposable
     private DateTimeOffset _restrictionEndsAt = DateTimeOffset.MaxValue;
     private int _scanRunning;
 
-    public Func<string, AppAccessChoice>? AccessRequested { get; set; }
+    public Func<ExplorerAccessRequest, AppAccessChoice>? AccessRequested { get; set; }
 
-    public ProcessBlockerService(JsonLogService logService)
+    public ProcessBlockerService(JsonLogService logService, GuardActionRecordService recordService)
     {
         _logService = logService;
+        _recordService = recordService;
     }
 
     public void Start(AppConfig config, string nightKey, DateTimeOffset restrictionEndsAt)
@@ -140,6 +138,149 @@ public sealed class ProcessBlockerService : IDisposable
         _restrictionEndsAt = restrictionEndsAt;
     }
 
+    public IReadOnlyList<string> GetRunningTargetProcesses(IEnumerable<string> processNames)
+    {
+        var targets = processNames
+            .Select(NormalizeProcessName)
+            .Where(name => name.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in targets)
+        {
+            foreach (var process in Process.GetProcessesByName(target))
+            {
+                try
+                {
+                    if (process.Id == _currentProcessId)
+                    {
+                        continue;
+                    }
+
+                    if (process.MainWindowHandle == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    results.Add($"{NormalizeProcessName(process.ProcessName)}.exe");
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+        }
+
+        return results.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public bool IsTemporarilyAllowed(string processName, DateTimeOffset now)
+    {
+        var normalized = NormalizeProcessName(processName);
+        if (_temporaryAllowedUntil.TryGetValue(normalized, out var allowedUntil))
+        {
+            if (allowedUntil > now)
+            {
+                return true;
+            }
+
+            _temporaryAllowedUntil.TryRemove(normalized, out _);
+        }
+
+        return false;
+    }
+
+    public void GrantTemporaryAccess(string processName, TimeSpan duration, string reason)
+    {
+        var normalized = NormalizeProcessName(processName);
+        var allowedUntil = DateTimeOffset.Now.Add(duration);
+        _temporaryAllowedUntil[normalized] = allowedUntil;
+        _logService.RecordSystemMessage(_nightKey, $"temporary app access granted: {normalized} until {allowedUntil:yyyy-MM-dd HH:mm:ss zzz}; {reason}");
+    }
+
+    public int MinimizeProcessWindows(string processName)
+    {
+        var normalized = NormalizeProcessName(processName);
+        var minimized = 0;
+        foreach (var process in Process.GetProcessesByName(normalized))
+        {
+            try
+            {
+                if (process.MainWindowHandle == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                if (ShowWindowAsync(process.MainWindowHandle, ShowWindowMinimize))
+                {
+                    minimized++;
+                }
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        return minimized;
+    }
+
+    public AppAccessChoice? RequestAccess(ExplorerAccessRequest request, string promptKey, DateTimeOffset now)
+    {
+        if (AccessRequested is null)
+        {
+            return null;
+        }
+
+        if (!_promptInProgress.TryAdd(promptKey, 0))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (_promptCooldownUntil.TryGetValue(promptKey, out var cooldownUntil) && cooldownUntil > now)
+            {
+                return null;
+            }
+
+            _promptCooldownUntil[promptKey] = DateTimeOffset.Now.AddSeconds(30);
+            return AccessRequested.Invoke(request);
+        }
+        finally
+        {
+            _promptInProgress.TryRemove(promptKey, out _);
+        }
+    }
+
+    public void SuppressPrompt(string promptKey, TimeSpan duration)
+    {
+        _promptCooldownUntil[promptKey] = DateTimeOffset.Now.Add(duration);
+    }
+
+    public void KillProcessByName(string processName, string type, string action, string note)
+    {
+        var normalized = NormalizeProcessName(processName);
+        foreach (var process in Process.GetProcessesByName(normalized))
+        {
+            try
+            {
+                var id = process.Id;
+                process.Kill(entireProcessTree: true);
+                _logService.RecordBlockedProcess(_nightKey, normalized, id);
+                _recordService.Add(type, $"{normalized}.exe", action, "成功", note);
+            }
+            catch (Exception ex)
+            {
+                _recordService.Add(type, $"{normalized}.exe", action, "失败", ex.Message);
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+    }
+
     public void Stop()
     {
         _timer?.Dispose();
@@ -147,6 +288,39 @@ public sealed class ProcessBlockerService : IDisposable
         _temporaryAllowedUntil.Clear();
         _promptCooldownUntil.Clear();
         _promptInProgress.Clear();
+    }
+
+    public int RunSafeTest(TestModeOptions options)
+    {
+        var targetName = NormalizeProcessName(options.TargetProcessName);
+        var killed = 0;
+
+        foreach (var process in Process.GetProcessesByName(targetName))
+        {
+            try
+            {
+                var id = process.Id;
+                process.Kill(entireProcessTree: true);
+                killed++;
+                _logService.RecordBlockedProcess(_nightKey, targetName, id);
+                _recordService.Add("测试模式", $"{targetName}.exe", "结束测试进程", "成功", "安全测试模式只处理指定测试程序");
+            }
+            catch (Exception ex)
+            {
+                _recordService.Add("测试模式", $"{targetName}.exe", "结束测试进程", "失败", ex.Message);
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        if (killed == 0)
+        {
+            _recordService.Add("测试模式", $"{targetName}.exe", "检测测试进程", "未检测到", "未处理任何真实应用或 hosts");
+        }
+
+        return killed;
     }
 
     private void Scan()
@@ -173,14 +347,15 @@ public sealed class ProcessBlockerService : IDisposable
                     var id = process.Id;
                     process.Kill(entireProcessTree: true);
                     _logService.RecordBlockedProcess(_nightKey, processName, id);
+                    _recordService.Add("应用拦截", $"{processName}.exe", "结束进程", "成功", hasWindow ? "前台应用命中限制规则" : "黑名单进程命中限制规则");
                     if (hasWindow)
                     {
                         AskForTemporaryAccess(processName, now);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Some system processes deny inspection or termination; ignoring keeps the guard stable.
+                    _recordService.Add("应用拦截", "未知进程", "结束进程", "失败", ex.Message);
                 }
                 finally
                 {
@@ -206,22 +381,12 @@ public sealed class ProcessBlockerService : IDisposable
             return false;
         }
 
-        if (_temporaryAllowedUntil.TryGetValue(processName, out var allowedUntil))
-        {
-            if (allowedUntil > now)
-            {
-                return false;
-            }
-
-            _temporaryAllowedUntil.TryRemove(processName, out _);
-        }
-
-        if (process.Id <= 4)
+        if (IsTemporarilyAllowed(processName, now))
         {
             return false;
         }
 
-        if (process.SessionId == 0)
+        if (process.Id <= 4 || process.SessionId == 0)
         {
             return false;
         }
@@ -249,34 +414,13 @@ public sealed class ProcessBlockerService : IDisposable
             return true;
         }
 
-        // Block-all mode is intended for foreground user apps. Background services,
-        // proxy cores, tray helpers, drivers, and watchdog processes usually have no
-        // main window; killing them caused proxy/screenshot/driver breakage.
         return _config.BlockAllAppsDuringRestriction && hasWindow;
     }
 
     private void AskForTemporaryAccess(string processName, DateTimeOffset now)
     {
-        if (AccessRequested is null)
-        {
-            return;
-        }
-
-        if (!_promptInProgress.TryAdd(processName, 0))
-        {
-            return;
-        }
-
-        if (_promptCooldownUntil.TryGetValue(processName, out var cooldownUntil) && cooldownUntil > now)
-        {
-            _promptInProgress.TryRemove(processName, out _);
-            return;
-        }
-
-        _promptCooldownUntil[processName] = DateTimeOffset.Now.AddSeconds(30);
         if (!_promptGate.Wait(0))
         {
-            _promptInProgress.TryRemove(processName, out _);
             return;
         }
 
@@ -284,24 +428,28 @@ public sealed class ProcessBlockerService : IDisposable
         {
             try
             {
-                var choice = AccessRequested.Invoke(processName);
-                var allowedUntil = choice switch
+                var choice = RequestAccess(new ExplorerAccessRequest
                 {
-                    AppAccessChoice.AllowOneMinute => DateTimeOffset.Now.AddMinutes(1),
-                    AppAccessChoice.AllowFifteenMinutes => DateTimeOffset.Now.AddMinutes(15),
-                    AppAccessChoice.AllowTonight => _restrictionEndsAt,
-                    _ => (DateTimeOffset?)null
+                    TargetName = $"{processName}.exe",
+                    Mode = ExplorerAccessMode.LimitedWrapUp
+                }, processName, now);
+
+                TimeSpan? duration = choice switch
+                {
+                    AppAccessChoice.AllowOneMinute => TimeSpan.FromMinutes(1),
+                    AppAccessChoice.AllowTenMinutes => TimeSpan.FromMinutes(10),
+                    AppAccessChoice.AllowFifteenMinutes => TimeSpan.FromMinutes(15),
+                    AppAccessChoice.AllowTonight => _restrictionEndsAt - DateTimeOffset.Now,
+                    _ => null
                 };
 
-                if (allowedUntil is not null)
+                if (duration is not null && duration.Value > TimeSpan.Zero)
                 {
-                    _temporaryAllowedUntil[processName] = allowedUntil.Value;
-                    _logService.RecordSystemMessage(_nightKey, $"temporary app access granted: {processName} until {allowedUntil.Value:yyyy-MM-dd HH:mm:ss zzz}");
+                    GrantTemporaryAccess(processName, duration.Value, "general restriction flow");
                 }
             }
             finally
             {
-                _promptInProgress.TryRemove(processName, out _);
                 _promptGate.Release();
             }
         });
@@ -314,6 +462,9 @@ public sealed class ProcessBlockerService : IDisposable
             ? trimmed[..^4]
             : trimmed;
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 
     public void Dispose()
     {
