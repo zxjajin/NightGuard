@@ -15,6 +15,7 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
     private bool _restrictionStartLogged;
     private DateTimeOffset? _unlockRequestedAt;
     private DateTimeOffset? _temporaryAllowedUntil;
+    private DateTimeOffset? _testModeUntil;
     private string _nightKey = DateTime.Today.ToString("yyyy-MM-dd");
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -34,6 +35,7 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
     public string RemainingRestrictionDisplay => $"今天剩余限制时间：{FormatTimeSpan(RemainingRestrictionTime)}";
     public string UnlockCountdownDisplay => $"倒计时：{FormatTimeSpan(UnlockCountdown)}";
     public string TonightUnlockCountDisplay => $"今晚已临时解锁次数：{TonightUnlockCount}";
+    public string RuleSummaryDisplay => $"应用白名单：{Config.AlwaysAllowedProcesses.Count} 个；网站黑名单：{Config.BlockedDomains.Count} 个";
     public int TonightUnlockCount { get; private set; }
     public bool CanEditRules => State is GuardState.NotRestricted;
     public bool CanRequestTemporaryUnlock => State is GuardState.Restricted && TonightUnlockCount < Config.MaxUnlocksPerNight;
@@ -51,13 +53,22 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
     public void ReloadConfig()
     {
         Config = _configService.Load();
-        var window = GetCurrentRestrictionWindow(DateTimeOffset.Now);
+        var window = GetActiveRestrictionWindow(DateTimeOffset.Now);
         if (_restrictionApplied && window is not null)
         {
             _processBlocker.UpdateConfig(Config, _nightKey, window.Value.End);
+            try
+            {
+                _hostsService.Apply(Config, _nightKey);
+            }
+            catch (Exception ex)
+            {
+                _logService.RecordSystemMessage(_nightKey, $"failed to re-apply hosts block after config reload: {ex.Message}");
+            }
         }
 
         OnPropertyChanged(nameof(Config));
+        OnPropertyChanged(nameof(RuleSummaryDisplay));
         Tick();
     }
 
@@ -85,10 +96,23 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public void RestoreHostsNow()
+    {
+        _hostsService.Restore(_nightKey);
+        _logService.RecordSystemMessage(_nightKey, "hosts restored manually");
+    }
+
+    public void StartTestMode(TimeSpan duration)
+    {
+        _testModeUntil = DateTimeOffset.Now.Add(duration);
+        _restrictionStartLogged = false;
+        Tick();
+    }
+
     private void Tick()
     {
         var now = DateTimeOffset.Now;
-        var window = GetCurrentRestrictionWindow(now);
+        var window = GetActiveRestrictionWindow(now);
         var inRestrictionWindow = window is not null;
         _nightKey = GetNightKey(now);
         TonightUnlockCount = _logService.GetTemporaryUnlockCount(_nightKey);
@@ -195,6 +219,21 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
         _restrictionApplied = false;
     }
 
+    private (DateTimeOffset Start, DateTimeOffset End)? GetActiveRestrictionWindow(DateTimeOffset now)
+    {
+        if (_testModeUntil is not null)
+        {
+            if (now < _testModeUntil.Value)
+            {
+                return (now, _testModeUntil.Value);
+            }
+
+            _testModeUntil = null;
+        }
+
+        return GetCurrentRestrictionWindow(now);
+    }
+
     private (DateTimeOffset Start, DateTimeOffset End)? GetCurrentRestrictionWindow(DateTimeOffset now)
     {
         var start = ParseTime(Config.RestrictionStart, new TimeOnly(23, 0));
@@ -270,6 +309,7 @@ public sealed class RestrictionEngine : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(RemainingRestrictionDisplay));
         OnPropertyChanged(nameof(UnlockCountdownDisplay));
         OnPropertyChanged(nameof(TonightUnlockCountDisplay));
+        OnPropertyChanged(nameof(RuleSummaryDisplay));
         OnPropertyChanged(nameof(TonightUnlockCount));
         OnPropertyChanged(nameof(CanRequestTemporaryUnlock));
         OnPropertyChanged(nameof(CanEditRules));

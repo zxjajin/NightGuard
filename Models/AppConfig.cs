@@ -46,6 +46,13 @@ public sealed class AppConfig
         "FlClashHelperService.exe",
         "Clash for Windows.exe",
         "Clash Core Service.exe",
+        "DesktopMgr64.exe",
+        "DesktopService64.exe",
+        "DesktopAITaskCenter.exe",
+        "DesktopMgr.exe",
+        "DesktopService.exe",
+        "QQDesktopMgr.exe",
+        "TencentDesktopMgr.exe",
         "PixPin.exe",
         "PixPinCapture.exe",
         "PixPinService.exe",
@@ -105,7 +112,37 @@ public sealed class AppConfig
         "php.exe"
     ];
     public List<string> BlockedProcesses { get; set; } = ["steam.exe", "game.exe"];
-    public List<string> BlockedDomains { get; set; } = ["youtube.com", "www.youtube.com"];
+    public List<string> BlockedDomains { get; set; } =
+    [
+        "douyin.com",
+        "www.douyin.com",
+        "live.douyin.com",
+        "creator.douyin.com",
+        "v.douyin.com",
+        "iesdouyin.com",
+        "www.iesdouyin.com",
+        "amemv.com",
+        "www.amemv.com",
+        "douyincdn.com",
+        "www.douyincdn.com",
+        "douyinpic.com",
+        "www.douyinpic.com",
+        "douyinvod.com",
+        "www.douyinvod.com",
+        "bilibili.com",
+        "www.bilibili.com",
+        "m.bilibili.com",
+        "space.bilibili.com",
+        "live.bilibili.com",
+        "api.bilibili.com",
+        "api.bilibili.tv",
+        "biliapi.net",
+        "biliapi.com",
+        "bilivideo.com",
+        "bilibili.tv",
+        "hdslb.com",
+        "upos-hz-mirrorakam.akamaized.net"
+    ];
     public int UnlockDelayMinutes { get; set; } = 5;
     public int TemporaryAllowanceMinutes { get; set; } = 10;
     public int MaxUnlocksPerNight { get; set; } = 2;

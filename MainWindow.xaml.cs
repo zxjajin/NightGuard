@@ -96,6 +96,11 @@ public partial class MainWindow : Window
         _viewModel.RequestTemporaryUnlock();
     }
 
+    private void StartTestMode_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.StartTestMode();
+    }
+
     private void UnlockSettings_Click(object sender, RoutedEventArgs e)
     {
         _viewModel.PasswordInput = SettingsPasswordBox.Password;
@@ -107,6 +112,11 @@ public partial class MainWindow : Window
         _viewModel.SettingsPasswordInput = NewPasswordBox.Password;
         _viewModel.SaveSettings();
         NewPasswordBox.Clear();
+    }
+
+    private void RestoreHosts_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.RestoreHostsNow();
     }
 
     private AppAccessChoice RequestAppAccess(string processName)

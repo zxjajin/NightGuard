@@ -88,7 +88,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         if (!SettingsUnlocked || !Engine.CanEditRules)
         {
-            SettingsMessage = "当前不能保存设置。";
+            SettingsMessage = "当前不能保存设置。限制期间请先退出限制模式。";
             OnPropertyChanged(nameof(SettingsMessage));
             return;
         }
@@ -112,13 +112,33 @@ public sealed class MainViewModel : INotifyPropertyChanged
         EditableConfig.StartWithWindows = _startupService.IsEnabled();
         SettingsPasswordInput = "";
         HydrateTextFields();
-        SettingsMessage = "设置已保存。";
+        SettingsMessage = "设置已保存。应用白名单、应用黑名单、网站黑名单已立即生效；如果刚更新程序代码，请重启 NightGuard。";
         OnPropertyChanged(nameof(EditableConfig));
         OnPropertyChanged(nameof(SettingsEditingEnabled));
         OnPropertyChanged(nameof(SettingsMessage));
     }
 
     public void RequestTemporaryUnlock() => Engine.RequestTemporaryUnlock();
+
+    public void StartTestMode()
+    {
+        Engine.StartTestMode(TimeSpan.FromMinutes(3));
+    }
+
+    public void RestoreHostsNow()
+    {
+        try
+        {
+            Engine.RestoreHostsNow();
+            SettingsMessage = "已立即恢复 hosts，并移除 NightGuard 写入的 hosts 区块。";
+        }
+        catch (Exception ex)
+        {
+            SettingsMessage = $"恢复 hosts 失败：{ex.Message}。请确认 NightGuard 是管理员权限运行。";
+        }
+
+        OnPropertyChanged(nameof(SettingsMessage));
+    }
 
     private void HydrateTextFields()
     {
